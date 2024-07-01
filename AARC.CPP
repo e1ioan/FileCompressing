@@ -15,292 +15,290 @@
 //--------------------------------------------------------------------------
 
 #include <stdio.h>
-#include <malloc.h>
+#include <stdlib.h>
 #include <process.h>
 #include <ctype.h>
-#include <STRING.H>
+#include <string.h>
+#include <stdbool.h>
 
-#define NUMAR_MAGIC 0x1234  //pentru recunoasterea arhivei
-#define OCTET 8
-typedef unsigned char      byte;
+#define MAGIC_NUMBER 0x1234  // For recognizing the archive
+#define BYTE_SIZE 8
+
+typedef unsigned char byte;
 typedef unsigned short int word;
-typedef struct ar{
-    struct ar *sptr;     //legatura stinga
-    struct ar *dptr;     //legatura dreapta
-    byte sval;           //caracterul din stinga
-    byte dval;           //caracterul din dreapta
-} ARBORE;                //structura unui nod de arbore
 
-ARBORE *arbore[256];     //arborele de caractere
-long frecvente[256];     //tabloul frecventelor de aparitie
-			 //a caracterelor in fisier
-byte *codificari[256];   //codificarile caracterelor
-word magic=NUMAR_MAGIC;
-long lungimeFisier=0L;
-void *radacina;          //radacina arborelui de refacere
+typedef struct TreeNode {
+    struct TreeNode *left;
+    struct TreeNode *right;
+    byte leftVal;
+    byte rightVal;
+} TreeNode;
 
-void scrieBit(byte bit,FILE *iesire)
-{
- static byte biti   =0;
- static byte contor =0;
- biti=(biti<<1)|((bit)?1:0);
- if(++contor==OCTET)
- {
-    putc(biti,iesire);
-    biti=contor=0;
- }
-}
+TreeNode *treeNodes[256];
+long frequencies[256];
+byte *encodings[256];
+word magic = MAGIC_NUMBER;
+long fileLength = 0L;
+void *root;
 
-void scrieOctet(byte biti,FILE *iesire)
-{
-   byte masca=0x80;
-   while(masca)
-   {
-       scrieBit(biti & masca,iesire);
-       masca>>=1;
-   }
-}
-
-int citesteBit(FILE *intrare)
-{
- static word biti   =0;
- static byte contor =0;
- if(contor==0)
- {
-    biti=getc(intrare);
-    contor=OCTET;
- }
- contor--;
- biti<<=1;
- return (biti & 0x100) ? 1 : 0;
-}
-
-byte citesteOctet(FILE *intrare)
-{
-    byte rezultat=0;
-    int contor=OCTET;
-    while(contor--)
-    {
-       rezultat<<=1;
-       rezultat|=citesteBit(intrare);
+void writeBit(byte bit, FILE *output) {
+    static byte bits = 0;
+    static byte counter = 0;
+    bits = (bits << 1) | (bit ? 1 : 0);
+    if (++counter == BYTE_SIZE) {
+        putc(bits, output);
+        bits = counter = 0;
     }
-    return rezultat;
 }
 
-void memoreazaDrum(int caracter,byte pozitie,byte *drum)
-{
-  codificari[caracter]=(byte*)malloc(pozitie+1);
-  codificari[caracter][0]=pozitie;
-  for(int i=0; i<pozitie; i++)
-      codificari[caracter][i+1]=drum[i];
+void writeByte(byte bits, FILE *output) {
+    byte mask = 0x80;
+    while (mask) {
+        writeBit(bits & mask, output);
+        mask >>= 1;
+    }
 }
 
-void decodificaArbore(ARBORE *adresa)
-{
-   static byte drum[256];
-   static byte pozitie=0;
-   drum[pozitie++]=0;
-   if(adresa->sptr)
-      decodificaArbore(adresa->sptr);
-   else
-      memoreazaDrum(adresa->sval,pozitie,drum);
-   drum[pozitie-1]=1;
-   if(adresa->dptr)
-      decodificaArbore(adresa->dptr);
-   else
-      memoreazaDrum(adresa->dval,pozitie,drum);
-   pozitie--;
+int readBit(FILE *input) {
+    static word bits = 0;
+    static byte counter = 0;
+    if (counter == 0) {
+        bits = getc(input);
+        counter = BYTE_SIZE;
+    }
+    counter--;
+    bits <<= 1;
+    return (bits & 0x100) ? 1 : 0;
 }
 
-int construiesteArbore(FILE* intrare)
-{
-   ARBORE *temporar;
-   unsigned long lmin1,lmin2;
-   short min1,min2;
-   int i,c;
-   //calcul frcventei caracterelor infisier
-   while((c=getc(intrare))!=EOF)
-   {
-      frecvente[c]++;
-      lungimeFisier++;
-   }
-   //constructia arborelui de codificare
-   while(1)
-   {
-     lmin1=lmin2=-1L;
-     //calculul celor mai mici doua elemente
-     //din tabloul de frcvente
-     for(i=0;i<256;i++)
-     {
-	if(frecvente[i]!=0L)
-	{
-	   if(frecvente[i]<lmin1)
-	   {
-	      lmin2=lmin1;
-	      min2=min1;
-	      lmin1=frecvente[i];
-	      min1=i;
-	   }
-	   else if(frecvente[i]<lmin2)
-	   {
-	      lmin2=frecvente[i];
-	      min2=i;
-	   }
-	}
-     }
-     //am gasit radacina ?
-     if(lmin2==-1)
-	break;
-     //constructia unui nod de arbore
-     temporar=(ARBORE*)malloc(sizeof(ARBORE));
-     temporar->sptr=arbore[min1];
-     temporar->dptr=arbore[min2];
-     temporar->sval=min1;
-     temporar->dval=min2;
-     arbore[min1]=temporar;
-     //greutatea unui nod este suma greutatilor
-     //nodurilor din care a fost compus
-     frecvente[min1]=lmin1+lmin2;
-     frecvente[min2]=0L;
-   }
-   return min1;
-}
-void scrieFisier(FILE *intrare,FILE *iesire)
-{
-   int c,lungime;
-   byte *ptr;
-   fseek(intrare,0L,SEEK_SET);
-   while((c=getc(intrare))!=EOF)
-   {
-      ptr=codificari[c];
-      lungime=(ptr)?(int)(*ptr++):0;
-      while(lungime--)
-	 scrieBit(*ptr++,iesire);
-   }
-   scrieOctet(0,iesire);
+byte readByte(FILE *input) {
+    byte result = 0;
+    int counter = BYTE_SIZE;
+    while (counter--) {
+        result <<= 1;
+        result |= readBit(input);
+    }
+    return result;
 }
 
-void scrieArbore(FILE* iesire)
-{
-   byte *ptr;
-   int i,lungime;
-   fwrite(&magic,sizeof(magic),1,iesire);
-   fwrite(&lungimeFisier,sizeof(lungimeFisier),1,iesire);
-   for(i=0;i<256;i++)
-   {
-      ptr=codificari[i];
-      lungime=(ptr)?(int)(*ptr++):0;
-      if(lungime)
-      {
-	 scrieBit(1,iesire);
-	 scrieOctet(lungime,iesire);
-	 while(lungime--)
-	       scrieBit(*ptr++,iesire);
-      }
-      else
-	 scrieBit(0,iesire);
-   }
+void storePath(int character, byte position, byte *path) {
+    encodings[character] = (byte *) malloc(position + 1);
+    if (!encodings[character]) {
+        perror("Memory allocation failed");
+        exit(EXIT_FAILURE);
+    }
+    encodings[character][0] = position;
+    for (int i = 0; i < position; i++) {
+        encodings[character][i + 1] = path[i];
+    }
 }
 
-void citesteDrum(int caracter,FILE *intrare)
-{
-   ARBORE *ptr;
-   int i,lungime;
-   int pozitie;
-   lungime=citesteOctet(intrare);
-   ptr =(ar*) radacina;
-   for(i=0;i<lungime;i++)
-   {
-       pozitie=citesteBit(intrare);
-       //daca nu exista nodul,il creaza
-       if(pozitie && !ptr->dptr)
-	  ptr->dptr=(ARBORE*)calloc(1,sizeof(ARBORE));
-       if(!pozitie && !ptr->sptr)
-	  ptr->sptr=(ARBORE*)calloc(1,sizeof(ARBORE));
-       ptr=(pozitie)?ptr->dptr:ptr->sptr;
-   }
-   ptr->sval=caracter;
-   ptr->dval=0xff;
+void decodeTree(TreeNode *address) {
+    static byte path[256];
+    static byte position = 0;
+    path[position++] = 0;
+    if (address->left) {
+        decodeTree(address->left);
+    } else {
+        storePath(address->leftVal, position, path);
+    }
+    path[position - 1] = 1;
+    if (address->right) {
+        decodeTree(address->right);
+    } else {
+        storePath(address->rightVal, position, path);
+    }
+    position--;
 }
 
-int decodificaOctet(FILE* intrare)
-{
-   ARBORE *ptr;
-   ptr=(ar*)radacina;
-   do
-   {
-      ptr=citesteBit(intrare)?(ar*)ptr->dptr:(ar*)ptr->sptr;
-   }
-   while(!ptr->dval);
-   return ptr->sval;
+int buildTree(FILE *input) {
+    TreeNode *tempNode;
+    unsigned long minFreq1, minFreq2;
+    short minIdx1, minIdx2;
+    int i, c;
+
+    // Calculate character frequencies in the file
+    while ((c = getc(input)) != EOF) {
+        frequencies[c]++;
+        fileLength++;
+    }
+
+    // Build the encoding tree
+    while (true) {
+        minFreq1 = minFreq2 = -1L;
+        minIdx1 = minIdx2 = -1;
+
+        // Find the two smallest elements in the frequency table
+        for (i = 0; i < 256; i++) {
+            if (frequencies[i] != 0L) {
+                if (frequencies[i] < minFreq1) {
+                    minFreq2 = minFreq1;
+                    minIdx2 = minIdx1;
+                    minFreq1 = frequencies[i];
+                    minIdx1 = i;
+                } else if (frequencies[i] < minFreq2) {
+                    minFreq2 = frequencies[i];
+                    minIdx2 = i;
+                }
+            }
+        }
+
+        // Found the root?
+        if (minFreq2 == -1) {
+            break;
+        }
+
+        // Create a tree node
+        tempNode = (TreeNode *) malloc(sizeof(TreeNode));
+        if (!tempNode) {
+            perror("Memory allocation failed");
+            exit(EXIT_FAILURE);
+        }
+        tempNode->left = treeNodes[minIdx1];
+        tempNode->right = treeNodes[minIdx2];
+        tempNode->leftVal = minIdx1;
+        tempNode->rightVal = minIdx2;
+        treeNodes[minIdx1] = tempNode;
+
+        // Update the frequency table
+        frequencies[minIdx1] = minFreq1 + minFreq2;
+        frequencies[minIdx2] = 0L;
+    }
+    return minIdx1;
 }
 
-void decodificaFisier(FILE *intrare,FILE*iesire)
-{
-   while(lungimeFisier--)
-      putc(decodificaOctet(intrare),iesire);
+void writeToFile(FILE *input, FILE *output) {
+    int c, length;
+    byte *ptr;
+    fseek(input, 0L, SEEK_SET);
+    while ((c = getc(input)) != EOF) {
+        ptr = encodings[c];
+        length = (ptr) ? (int) (*ptr++) : 0;
+        while (length--) {
+            writeBit(*ptr++, output);
+        }
+    }
+    writeByte(0, output);
 }
 
-void citesteCodificare(FILE* intrare)
-{
-  int i;
-  fread(&magic,sizeof(magic),1,intrare);
-  if(magic!=NUMAR_MAGIC)
-  {
-     printf("Fisierul de intrare nu este compactat !\n");
-     exit(1);
-  }
-  fread(&lungimeFisier,sizeof(lungimeFisier),1,intrare);
-  radacina=calloc(1,2+2*sizeof(char*));
-  for(i=0;i<256;i++)
-     if(citesteBit(intrare))
-	citesteDrum(i,intrare);
+void writeTree(FILE *output) {
+    byte *ptr;
+    int i, length;
+    fwrite(&magic, sizeof(magic), 1, output);
+    fwrite(&fileLength, sizeof(fileLength), 1, output);
+    for (i = 0; i < 256; i++) {
+        ptr = encodings[i];
+        length = (ptr) ? (int) (*ptr++) : 0;
+        if (length) {
+            writeBit(1, output);
+            writeByte(length, output);
+            while (length--) {
+                writeBit(*ptr++, output);
+            }
+        } else {
+            writeBit(0, output);
+        }
+    }
 }
 
+void readPath(int character, FILE *input) {
+    TreeNode *ptr;
+    int i, length;
+    int position;
+    length = readByte(input);
+    ptr = (TreeNode *) root;
+    for (i = 0; i < length; i++) {
+        position = readBit(input);
+        if (position && !ptr->right) {
+            ptr->right = (TreeNode *) calloc(1, sizeof(TreeNode));
+            if (!ptr->right) {
+                perror("Memory allocation failed");
+                exit(EXIT_FAILURE);
+            }
+        }
+        if (!position && !ptr->left) {
+            ptr->left = (TreeNode *) calloc(1, sizeof(TreeNode));
+            if (!ptr->left) {
+                perror("Memory allocation failed");
+                exit(EXIT_FAILURE);
+            }
+        }
+        ptr = (position) ? ptr->right : ptr->left;
+    }
+    ptr->leftVal = character;
+    ptr->rightVal = 0xff;
+}
 
-int main(int argc,char** argv)
-{
-  FILE *intrare,*iesire;
-  if(argc<4 || argv[1][0] == '?')
-  {
-   printf("Program de arhivare AARC, realizat la FUTURA SOFTWARE S.R.L.\n");
-   printf("Loc. BUCURESTI Str.Cetatea Histriei Nr.1 TEL/FAX (401) 726.72.04\n");
-   printf("Se va folosi numai cu acordul firmei prezentate mai sus.\n");
-   printf("                   (c) 1994\n");
-   printf("Utilizare aarc c / e fis_de_arhivat nume_arhiva\n");
-   printf("   c - pentru arhivare\n");
-   printf("   e - pentru dezarhivare\n");
-   return 1;
-  }
-  if((toupper(argv[1][0])!='C'&& toupper(argv[1][0])!='E'))
-  {
-    printf("Comanda incorecta: %s\n",argv[1]);
-    return 1;
-  }
-  if((intrare=fopen(argv[2],"rb"))==NULL)
-  {
-    printf("Nu pot deschide fisierul de intrare !\n");
-    return 1;
-  }
-  if((iesire=fopen(argv[3],"wb"))==NULL)
-  {
-    printf("Nu pot deschide fisierul de iesire !\n");
-    return 1;
-  }
-  if(toupper(argv[1][0])=='C')
-  {
-     decodificaArbore(arbore[construiesteArbore(intrare)]);
-     scrieArbore(iesire);
-     scrieFisier(intrare,iesire);
-  }
-  else
-  {
-    citesteCodificare(intrare);
-    decodificaFisier(intrare,iesire);
-  }
-  fclose(intrare);
-  fclose(iesire);
-  return 0;
+int decodeByte(FILE *input) {
+    TreeNode *ptr;
+    ptr = (TreeNode *) root;
+    do {
+        ptr = readBit(input) ? ptr->right : ptr->left;
+    } while (!ptr->rightVal);
+    return ptr->leftVal;
+}
+
+void decodeFile(FILE *input, FILE *output) {
+    while (fileLength--) {
+        putc(decodeByte(input), output);
+    }
+}
+
+void readEncoding(FILE *input) {
+    int i;
+    fread(&magic, sizeof(magic), 1, input);
+    if (magic != MAGIC_NUMBER) {
+        printf("The input file is not compressed!\n");
+        exit(EXIT_FAILURE);
+    }
+    fread(&fileLength, sizeof(fileLength), 1, input);
+    root = calloc(1, sizeof(TreeNode));
+    if (!root) {
+        perror("Memory allocation failed");
+        exit(EXIT_FAILURE);
+    }
+    for (i = 0; i < 256; i++) {
+        if (readBit(input)) {
+            readPath(i, input);
+        }
+    }
+}
+
+int main(int argc, char **argv) {
+    FILE *input, *output;
+    if (argc < 4 || argv[1][0] == '?') {
+        printf("Compression program AARC, created by FUTURA SOFTWARE S.R.L.\n");
+        printf("Location: BUCHAREST, Cetatea Histriei Str. No. 1 TEL/FAX (401) 726.72.04\n");
+        printf("Use only with permission from the above-mentioned company.\n");
+        printf("                   (c) 1994\n");
+        printf("Usage: aarc c / e file_to_archive archive_name\n");
+        printf("   c - for compression\n");
+        printf("   e - for decompression\n");
+        return 1;
+    }
+    if (toupper(argv[1][0]) != 'C' && toupper(argv[1][0]) != 'E') {
+        printf("Incorrect command: %s\n", argv[1]);
+        return 1;
+    }
+    if ((input = fopen(argv[2], "rb")) == NULL) {
+        perror("Cannot open input file");
+        return 1;
+    }
+    if ((output = fopen(argv[3], "wb")) == NULL) {
+        perror("Cannot open output file");
+        return 1;
+    }
+    if (toupper(argv[1][0]) == 'C') {
+        decodeTree(treeNodes[buildTree(input)]);
+        writeTree(output);
+        writeToFile(input, output);
+    } else {
+        readEncoding(input);
+        decodeFile(input, output);
+    }
+    fclose(input);
+    fclose(output);
+    return 0;
 }
 //--------------------------------------------------------------------------
 //  End of File  : instal.cpp
