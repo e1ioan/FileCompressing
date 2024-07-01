@@ -267,8 +267,8 @@ void readEncoding(FILE *input) {
 int main(int argc, char **argv) {
     FILE *input, *output;
     if (argc < 4 || argv[1][0] == '?') {
-        printf("Compression program AARC, created by FUTURA SOFTWARE S.R.L.\n");
-        printf("Location: BUCHAREST, Cetatea Histriei Str. No. 1 TEL/FAX (401) 726.72.04\n");
+        printf("Compression program AARC, created by [...]");
+        printf("Location: [...]");
         printf("Use only with permission from the above-mentioned company.\n");
         printf("                   (c) 1994\n");
         printf("Usage: aarc c / e file_to_archive archive_name\n");
